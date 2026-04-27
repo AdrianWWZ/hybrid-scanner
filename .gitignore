@@ -1,0 +1,9 @@
+.venv/
+.env
+__pycache__/
+*.pyc
+results/
+node_modules/
+out/
+cache/
+crytic-export/
