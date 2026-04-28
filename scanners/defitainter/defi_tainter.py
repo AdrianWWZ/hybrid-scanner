@@ -62,13 +62,40 @@ class Contract:
         loc = "./gigahorse-toolchain/contracts/" + self.logic_addr + ".hex"
         if os.path.exists(loc):
             return 
-        else:
-            w3 = Web3(Web3.HTTPProvider(self.url))
-            contract_address = Web3.to_checksum_address(self.logic_addr)
-            code = str(w3.eth.get_code(contract_address).hex())
-            if code != "0x":
-                with open(loc, "w") as f:
-                    f.write(code[2:])
+        
+        w3 = Web3(Web3.HTTPProvider(self.url))
+        addr = Web3.to_checksum_address(self.logic_addr)
+
+        # 1. Try EIP-1967 implementation slot
+        EIP1967_IMPL_SLOT = 0x360894a13ba1a3210667c828492db98dca3e2076cc3735a920a3ca505d382bbc
+        try:
+            slot_value = w3.eth.get_storage_at(addr, EIP1967_IMPL_SLOT, block_identifier=int(self.block_number))
+            impl_hex = "0x" + slot_value.hex()[-40:]
+            if int(impl_hex, 16) != 0:
+                addr = Web3.to_checksum_address(impl_hex)
+        except Exception:
+            pass
+
+        # 2. If still looks empty, try implementation() view call
+        code = w3.eth.get_code(addr, block_identifier=int(self.block_number))
+        if len(code) < 100:  # too small — probably a proxy with no impl resolved
+            try:
+                impl_call = w3.eth.call(
+                    {"to": Web3.to_checksum_address(self.logic_addr),
+                    "data": "0x5c60da1b"},  # implementation()
+                    block_identifier=int(self.block_number)
+                )
+                impl_hex = "0x" + impl_call.hex()[-40:]
+                if int(impl_hex, 16) != 0:
+                    addr = Web3.to_checksum_address(impl_hex)
+                    code = w3.eth.get_code(addr, block_identifier=int(self.block_number))
+            except Exception:
+                pass
+
+        code_hex = code.hex()
+        if code_hex and code_hex != "":
+            with open(loc, "w") as f:
+                f.write(code_hex)
 
     def analyze_contract(self):
         command = "cd ./gigahorse-toolchain && ./gigahorse.py -j 1 -C ./clients/price_manipulation_analysis.dl ./contracts/{contract_addr}.hex"
